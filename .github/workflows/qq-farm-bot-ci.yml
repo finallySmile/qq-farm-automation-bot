@@ -1,5 +1,5 @@
 # 文件路径: .github/workflows/qq-farm-bot-ci.yml
-name: QQ农场机器人自动构建 (优化版)
+name: QQ农场机器人极简构建 (单镜像版)
 
 on:
   schedule:
@@ -10,43 +10,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 设置 Docker 环境
+      - name: 1. 清理本地 Docker 缓存
+        run: |
+          echo "清理本地 Docker 缓存..."
+          docker system prune -af --volumes
+          echo "✅ 本地缓存已清理"
+
+      - name: 2. 设置 Docker Buildx（最小配置）
         uses: docker/setup-buildx-action@v3
         with:
-          # 使用最新版本，避免缓存问题
           version: latest
+          # 禁用缓存，避免生成额外镜像层
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
 
-      - name: 2. 登录 Docker Hub
+      - name: 3. 登录 Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 3. 清理旧镜像（尝试）
-        run: |
-          echo "尝试清理 Docker Hub 上的旧镜像..."
-          echo "注意：Docker Hub 免费账户 API 限制较多，清理可能需要手动完成"
-
-          # 尝试使用 Docker Hub API 删除旧镜像（可能需要认证）
-          # 由于免费账户限制，这里主要是提示信息
-          echo "如果镜像过多，请手动清理："
-          echo "1. 登录 Docker Hub"
-          echo "2. 进入你的仓库"
-          echo "3. 删除所有无标签的旧镜像"
-          echo "4. 保留最新的 'latest' 标签"
-
-      - name: 4. 构建单平台镜像
+      - name: 4. 构建单镜像（无缓存、无多平台）
         run: |
           TEMP_DIR=$(mktemp -d)
 
           echo "克隆上游代码..."
           git clone --depth 1 https://github.com/XyhTender/qq-farm-automation-bot.git $TEMP_DIR
 
-          echo "开始构建单平台镜像..."
-          # 关键优化：只构建 linux/amd64 平台，避免多平台镜像
+          echo "构建单镜像..."
+          # 关键参数：
+          # --no-cache: 完全禁用缓存
+          # --platform linux/amd64: 只构建单平台
+          # --load: 加载到本地（可选，但我们直接推送）
+          # --push: 推送到仓库
           docker buildx build \
-            --platform linux/amd64 \
             --no-cache \
+            --platform linux/amd64 \
             -f $TEMP_DIR/core/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest \
             --push \
@@ -54,20 +54,19 @@ jobs:
 
           rm -rf $TEMP_DIR
 
-          echo "✅ 单平台镜像构建完成"
+          echo "✅ 单镜像构建完成"
 
-      - name: 5. 验证镜像
+      - name: 5. 验证镜像数量
         run: |
-          echo "镜像信息："
-          echo "仓库：${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot"
-          echo "标签：latest"
-          echo "平台：linux/amd64"
-          echo "================================"
+          echo "检查 Docker Hub 上的镜像数量..."
+          echo "请手动登录 Docker Hub 查看："
+          echo "https://hub.docker.com/repository/docker/${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot"
+          echo "如果仍然有多个镜像，可能是 Dockerfile 的问题"
 
       - name: 6. 构建完成通知
         run: |
           echo "================================"
-          echo "✅ 优化构建完成！"
+          echo "✅ 极简构建完成！"
           echo "镜像地址：${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest"
           echo "构建时间：$(date '+%Y-%m-%d %H:%M:%S')"
           echo "================================"
