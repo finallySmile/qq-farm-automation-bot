@@ -1,4 +1,4 @@
-name: QQ农场机器人传统构建
+name: QQ农场机器人单镜像构建
 
 on:
   schedule:
@@ -9,16 +9,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 设置 Docker 环境
-        uses: docker/setup-docker@v1
+      - name: 1. 登录 Docker Hub
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      - name: 2. 登录 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 3. 传统构建并推送
+      - name: 2. 构建、保存、加载、推送
         run: |
           TEMP_DIR=$(mktemp -d)
 
@@ -28,26 +23,36 @@ jobs:
           echo "切换到 core 目录..."
           cd $TEMP_DIR/core
 
-          echo "开始传统构建..."
-          # 使用传统 docker build，不使用 Buildx
+          echo "构建镜像..."
           docker build \
             --no-cache \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest .
+            -t qq-farm-automation-bot:latest .
 
-          echo "推送镜像..."
+          echo "保存镜像到文件..."
+          docker save qq-farm-automation-bot:latest > /tmp/qq-farm-bot.tar
+
+          echo "清理本地镜像..."
+          docker rmi qq-farm-automation-bot:latest
+
+          echo "从文件加载镜像..."
+          docker load < /tmp/qq-farm-bot.tar
+
+          echo "推送镜像到 Docker Hub..."
+          docker tag qq-farm-automation-bot:latest ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest
 
           echo "清理..."
           cd ..
           rm -rf $TEMP_DIR
+          rm -f /tmp/qq-farm-bot.tar
 
-          echo "✅ 构建完成"
+          echo "✅ 单镜像构建推送完成"
 
-      - name: 4. 构建完成通知
+      - name: 3. 构建完成通知
         run: |
           echo "================================"
           echo "✅ 镜像构建完成！"
           echo "镜像地址：${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest"
-          echo "构建方式：传统 Docker 构建（非 Buildx）"
+          echo "构建方式：传统构建 + save/load"
           echo "构建时间：$(date '+%Y-%m-%d %H:%M:%S')"
           echo "================================"
