@@ -66,13 +66,13 @@ jobs:
           fi
 
           echo "开始构建 Docker 镜像..."
-          # 注意：这里指定了 core 目录作为构建上下文
-          # 假设 Dockerfile 位于 core 目录内
+          # 关键修改：使用根目录作为构建上下文，指定 Dockerfile 路径
           docker buildx build \
             --platform linux/amd64 \
+            -f core/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest \
             --push \
-            ./core/
+            .
 
           # 清理临时文件
           cd ..
