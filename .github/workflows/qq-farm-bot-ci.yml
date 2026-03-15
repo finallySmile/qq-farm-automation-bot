@@ -47,44 +47,45 @@ jobs:
         run: |
           # 创建一个临时目录
           TEMP_DIR=$(mktemp -d)
-          cd $TEMP_DIR
 
           echo "正在克隆上游仓库代码..."
-          git clone --depth 1 https://github.com/XyhTender/qq-farm-automation-bot.git .
+          git clone --depth 1 https://github.com/XyhTender/qq-farm-automation-bot.git $TEMP_DIR
 
           echo "检查项目结构..."
           # 检查core目录是否存在
-          if [ -d "core" ]; then
+          if [ -d "$TEMP_DIR/core" ]; then
             echo "✅ 找到 core 目录"
             echo "core 目录内容："
-            ls -la core/
+            ls -la $TEMP_DIR/core/
           else
             echo "❌ 未找到 core 目录"
             echo "根目录内容："
-            ls -la
+            ls -la $TEMP_DIR
             exit 1
           fi
 
           echo "开始构建 Docker 镜像..."
-          # 关键修改：使用根目录作为构建上下文，指定 Dockerfile 路径
+          # 构建镜像
           docker buildx build \
             --platform linux/amd64 \
-            -f core/Dockerfile \
+            -f $TEMP_DIR/core/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest \
             --push \
-            .
+            $TEMP_DIR
 
           # 清理临时文件
-          cd ..
           rm -rf $TEMP_DIR
 
-          # 保存本次构建的提交哈希
-          echo ${{ steps.check.outputs.new_hash }} > last_build_hash.txt
+          echo "构建完成，准备更新哈希记录..."
 
       - name: 5. 更新哈希记录（可选）
         id: update-hash
         if: steps.check.outputs.needs_build == 'true'
         run: |
+          # 在fork仓库的目录中保存哈希记录
+          echo ${{ steps.check.outputs.new_hash }} > last_build_hash.txt
+
+          # 配置git并提交
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add last_build_hash.txt
