@@ -1,0 +1,94 @@
+# 文件路径: .github/workflows/qq-farm-bot-ci.yml
+# 工作流名称: QQ农场机器人自动构建
+# 用途: 检测上游项目更新，自动构建并推送Docker镜像
+
+name: QQ农场机器人自动构建
+
+on:
+  # 每12小时自动检测一次（UTC时间）
+  schedule:
+    - cron: '0 */12 * * *'
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  检测并构建:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 检查上游是否有更新
+        id: check
+        run: |
+          # 获取上游仓库最新的提交哈希（唯一标识）
+          UPSTREAM_HASH=$(git ls-remote https://github.com/XyhTender/qq-farm-automation-bot.git HEAD | cut -f1)
+          echo "上游最新提交哈希: $UPSTREAM_HASH"
+
+          # 读取本地记录的上次构建哈希（第一次运行时不存在）
+          LAST_BUILD_HASH=$(cat last_build_hash.txt 2>/dev/null || echo "none")
+          echo "本地记录的上次构建哈希: $LAST_BUILD_HASH"
+
+          # 对比两个哈希
+          if [ "$UPSTREAM_HASH" = "$LAST_BUILD_HASH" ]; then
+            echo "✅ 上游没有更新，跳过构建"
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "🚨 检测到上游有更新！"
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            echo "new_hash=$UPSTREAM_HASH" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 2. 设置 Docker 构建环境
+        if: steps.check.outputs.needs_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: 3. 登录 Docker Hub
+        if: steps.check.outputs.needs_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 4. 基于上游代码构建并推送镜像
+        if: steps.check.outputs.needs_build == 'true'
+        run: |
+          # 创建一个临时目录
+          TEMP_DIR=$(mktemp -d)
+          cd $TEMP_DIR
+
+          echo "正在克隆上游仓库代码..."
+          # 只克隆最新代码，不下载完整历史
+          git clone --depth 1 https://github.com/XyhTender/qq-farm-automation-bot.git .
+
+          echo "开始构建 Docker 镜像..."
+          # 构建并直接推送到 Docker Hub
+          docker buildx build \
+            --platform linux/amd64 \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest \
+            --push \
+            .
+
+          # 清理临时文件
+          cd ..
+          rm -rf $TEMP_DIR
+
+          # 保存本次构建的提交哈希，用于下次对比
+          echo ${{ steps.check.outputs.new_hash }} > last_build_hash.txt
+
+      - name: 5. 更新哈希记录（可选）
+        if: steps.check.outputs.needs_build == 'true'
+        run: |
+          # 将哈希记录文件推送到你的仓库，方便你查看历史记录
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add last_build_hash.txt
+          git commit -m "更新构建哈希记录: ${{ steps.check.outputs.new_hash }}" || echo "没有文件需要提交"
+          git push || echo "推送失败，但镜像已成功构建"
+
+      - name: 6. 构建完成通知
+        if: steps.check.outputs.needs_build == 'true'
+        run: |
+          echo "================================"
+          echo "✅ 镜像构建成功！"
+          echo "镜像地址: ${{ secrets.DOCKERHUB_USERNAME }}/qq-farm-automation-bot:latest"
+          echo "基于上游提交: ${{ steps.check.outputs.new_hash }}"
+          echo "构建完成时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "================================"
